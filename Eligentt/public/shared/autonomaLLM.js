@@ -68,7 +68,9 @@
     'USER CONTEXT:',
     'The app has these tabs: Send Assets, Batch Payments, Payment Links, Invoices, Schedule, Swap, Bridge, Liquidity Pool, Autonoma AI, AI Smart Wallet, Treasury Vault, CrossChain, Recipients, Templates, Reports, Settings, Payment Queue.',
     '',
-    'IMPORTANT: This app runs on Arc MAINNET (Chain ID 5042), NOT testnet. NEVER say "Arc Testnet" in any response. Always say "Arc Mainnet" or just "Arc".'
+    'IMPORTANT: This app runs on Arc MAINNET (Chain ID 5042), NOT testnet. NEVER say "Arc Testnet" in any response. Always say "Arc Mainnet" or just "Arc".',
+    '',
+    'x402 PAYMENTS: You support the x402 HTTP payment protocol (EIP-3009 gasless micropayments via Circle Gateway Nanopayments). When the user asks to access a paid API, paid resource, paid data feed, or any x402-protected URL, use the fetch_paid_resource function. The payment is signed by the user\'s wallet (non-custodial, no gas required on Arc). You can explain x402 when asked.'
   ].join('\n');
 
   var TOOLS = [
@@ -250,14 +252,129 @@
           properties: {}
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'fetch_paid_resource',
+        description: 'Access a paid API or resource protected by x402 HTTP payment protocol. Signs a gasless EIP-3009 payment with the user wallet and retrieves the resource. Use when the user asks to access a paid URL, paid data feed, paid AI service, or any x402-protected resource.',
+        parameters: {
+          type: 'object',
+          properties: {
+            url:    { type: 'string',  description: 'The URL of the x402-protected resource to fetch' },
+            amount: { type: 'number',  description: 'Expected payment amount in USDC (optional, auto-negotiated if omitted)' },
+            token:  { type: 'string',  enum: ['USDC', 'EURC'], description: 'Token to pay with', default: 'USDC' },
+            method: { type: 'string',  enum: ['GET', 'POST'], description: 'HTTP method', default: 'GET' },
+            body:   { type: 'string',  description: 'Request body for POST requests (JSON string)' }
+          },
+          required: ['url']
+        }
+      }
     }
   ];
 
+  /* ── Conversation history for multi-turn context ─────────────── */
+  var _conversationHistory = [];
+  var HISTORY_MAX = 12; // keep last 6 user+assistant pairs
+
+  function _addToHistory(role, content) {
+    _conversationHistory.push({ role: role, content: content });
+    if (_conversationHistory.length > HISTORY_MAX) {
+      _conversationHistory = _conversationHistory.slice(_conversationHistory.length - HISTORY_MAX);
+    }
+  }
+
+  function clearHistory() {
+    _conversationHistory = [];
+  }
+
+  /* ── Live blockchain context injected into every system prompt ─ */
+  function _buildLiveContext() {
+    var lines = [];
+    try {
+      // Wallet state
+      var addr = (typeof window !== 'undefined' && window.walletAddress) ? window.walletAddress : null;
+      var chainId = (typeof window !== 'undefined' && window.activeChainId) ? window.activeChainId : 5042;
+      var walletType = (typeof window !== 'undefined' && window.activeWalletType) ? window.activeWalletType : 'external';
+      lines.push('CURRENT WALLET STATE:');
+      lines.push('- Connected: ' + (addr ? 'yes' : 'no'));
+      if (addr) lines.push('- Address: ' + addr);
+      lines.push('- Chain ID: ' + chainId + (chainId === 5042 ? ' (Arc Mainnet)' : ''));
+      lines.push('- Wallet type: ' + walletType);
+
+      // Balances from DOM (real, not mocked)
+      var usdcEl = (typeof document !== 'undefined') ? document.getElementById('sb-bal') : null;
+      var eurcEl = (typeof document !== 'undefined') ? document.getElementById('sb-eurc-bal') : null;
+      var btcEl  = (typeof document !== 'undefined') ? document.getElementById('sb-btc-bal') : null;
+      if (usdcEl || eurcEl || btcEl) {
+        lines.push('- Balances (live):');
+        if (usdcEl && usdcEl.textContent && usdcEl.textContent !== '—') lines.push('  USDC: ' + usdcEl.textContent.trim());
+        if (eurcEl && eurcEl.textContent && eurcEl.textContent !== '—') lines.push('  EURC: ' + eurcEl.textContent.trim());
+        if (btcEl  && btcEl.textContent  && btcEl.textContent  !== '—') lines.push('  cirBTC: ' + btcEl.textContent.trim());
+      }
+
+      // Agent wallet
+      var AWM = (typeof window !== 'undefined' && window.AgentWalletManager) ? window.AgentWalletManager : null;
+      if (AWM && typeof AWM.getAgentAddress === 'function') {
+        var agentAddr = AWM.getAgentAddress();
+        if (agentAddr) lines.push('- Agent wallet: ' + agentAddr);
+      }
+
+      // Financial OS context
+      var FC = (typeof window !== 'undefined' && window.FinancialContext) ? window.FinancialContext : null;
+      if (FC && typeof FC.getSnapshot === 'function') {
+        try {
+          var snap = FC.getSnapshot();
+          if (snap && snap.balance && snap.balance.totalUsd) {
+            lines.push('- Portfolio total (USD): $' + snap.balance.totalUsd.toFixed(2));
+          }
+          if (snap && snap.schedules && snap.schedules.active) {
+            lines.push('- Active scheduled payments: ' + snap.schedules.active);
+          }
+        } catch (_e) {}
+      }
+
+      // Contacts summary
+      var contacts = null;
+      try {
+        if (typeof window !== 'undefined' && window.ContactsHub && typeof window.ContactsHub.getAll === 'function') {
+          contacts = window.ContactsHub.getAll();
+        } else if (typeof window !== 'undefined' && window._contacts && typeof window._contacts === 'function') {
+          contacts = window._contacts();
+        }
+      } catch (_e) {}
+      if (contacts && contacts.length) {
+        lines.push('- Saved contacts (' + contacts.length + '): ' + contacts.slice(0, 8).map(function(c){ return c.name + ' (' + (c.addr || c.address || '').slice(0, 8) + '...)'; }).join(', '));
+      }
+
+      // Pending tx
+      var pendingEl = (typeof document !== 'undefined') ? document.querySelector('[id*="pending-tx"], [class*="pending-tx"]') : null;
+      if (pendingEl && pendingEl.textContent) lines.push('- Pending transaction: yes');
+
+    } catch (_ex) {}
+
+    if (lines.length <= 1) return ''; // only header, no data
+    return '\n\n' + lines.join('\n');
+  }
+
   function _buildMessages(userMsg) {
-    return [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userMsg }
-    ];
+    var liveCtx = _buildLiveContext();
+    var systemWithCtx = SYSTEM_PROMPT + liveCtx +
+      '\n\nCONVERSATION RULES:\n' +
+      '- Remember what the user said earlier in this conversation. Do NOT ask again for info already provided.\n' +
+      '- If the user says "do it", "go ahead", "confirm", "yes" or similar after a plan was explained, execute it.\n' +
+      '- If info is missing and already in context above, use it — do not ask again.\n' +
+      '- Respond in the same language the user writes in (English or Portuguese).\n' +
+      '- For read-only queries (balance, history, status), answer directly without calling a function.\n' +
+      '- For financial actions, always explain what you will do BEFORE calling a function.';
+
+    var messages = [{ role: 'system', content: systemWithCtx }];
+    // Inject conversation history for multi-turn
+    for (var i = 0; i < _conversationHistory.length; i++) {
+      messages.push(_conversationHistory[i]);
+    }
+    messages.push({ role: 'user', content: userMsg });
+    return messages;
   }
 
   async function _callDeepSeek(messages, tools) {
@@ -308,13 +425,21 @@
     var choice = result.choices[0];
     var msg = choice.message;
 
+    // Save user message to history
+    _addToHistory('user', userMsg);
+
     // Tool call response — route to existing handlers
     if (msg.tool_calls && msg.tool_calls.length > 0) {
-      return _handleToolCall(msg.tool_calls[0]);
+      var toolResult = _handleToolCall(msg.tool_calls[0]);
+      // Save tool call intent as assistant message in history (text summary)
+      _addToHistory('assistant', '[Action: ' + msg.tool_calls[0].function.name + ']');
+      return toolResult;
     }
 
     // Direct text response
     if (msg.content && msg.content.trim()) {
+      // Save assistant response to history
+      _addToHistory('assistant', msg.content.trim());
       return _formatTextResponse(msg.content);
     }
 
@@ -361,9 +486,89 @@
         return _handleManagePermissions(args);
       case 'get_help':
         return _handleGetHelp();
+      case 'fetch_paid_resource':
+        return _handleFetchPaidResource(args);
       default:
         return null;
     }
+  }
+
+  function _handleFetchPaidResource(args) {
+    var url    = args.url    || '';
+    var token  = args.token  || 'USDC';
+    var method = args.method || 'GET';
+    var body   = args.body   || null;
+
+    if (!url) {
+      return _cardHtml('x402 Payment', '<p style="color:var(--red)">No URL provided.</p>', 'lock', 'var(--red)');
+    }
+
+    // Launch async x402 fetch — returns a card immediately with pending state,
+    // then updates the chat bubble when the payment completes.
+    var bubbleId = 'x402-bubble-' + Date.now();
+
+    // Immediate pending card
+    var pendingHtml = _cardHtml(
+      'x402 — Paid Resource',
+      '<div id="' + bubbleId + '">' +
+      '<div style="color:var(--muted2);font-size:9px;margin-bottom:6px">⏳ Requesting resource...</div>' +
+      '<div class="aut-detail"><span>URL</span><span style="font-size:8px;word-break:break-all">' + escHtml(url) + '</span></div>' +
+      '<div class="aut-detail"><span>Method</span><span>' + method + '</span></div>' +
+      '<div class="aut-detail"><span>Token</span><span>' + token + '</span></div>' +
+      '</div>',
+      'lock', 'var(--cyan)'
+    );
+
+    // Kick off the x402 fetch asynchronously
+    (async function () {
+      var x402 = window.AutonomaX402;
+      if (!x402) {
+        var el = document.getElementById(bubbleId);
+        if (el) el.innerHTML = '<div style="color:var(--red);font-size:9px">x402 module not loaded.</div>';
+        return;
+      }
+
+      if (!x402.isReady()) {
+        var el2 = document.getElementById(bubbleId);
+        if (el2) el2.innerHTML = '<div style="color:var(--orange);font-size:9px">⚠ Connect your wallet to use x402 paid resources.</div>';
+        return;
+      }
+
+      var walletAddr = window._elligenttWallet && window._elligenttWallet.address;
+      var chainId    = window._elligenttWallet && window._elligenttWallet.chainId || 5042;
+
+      var result = await x402.fetch(url, {
+        walletAddress: walletAddr,
+        chainId:       chainId,
+        token:         token,
+        method:        method,
+        body:          body
+      });
+
+      var el3 = document.getElementById(bubbleId);
+      if (!el3) return;
+
+      if (result.ok) {
+        var preview = result.data ? result.data.substring(0, 500) : '(empty response)';
+        el3.innerHTML =
+          '<div style="color:var(--green);font-size:9px;margin-bottom:6px">✓ Payment confirmed · ' + result.amount + ' ' + token + '</div>' +
+          '<div class="aut-detail"><span>URL</span><span style="font-size:8px;word-break:break-all">' + escHtml(url) + '</span></div>' +
+          '<div class="aut-detail"><span>Paid</span><span>' + result.amount + ' ' + token + '</span></div>' +
+          (result.paymentMade ? '<div class="aut-detail"><span>Gas</span><span style="color:var(--green)">Gasless (EIP-3009)</span></div>' : '') +
+          '<div style="margin-top:6px;padding:6px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:4px;font-size:8px;font-family:monospace;white-space:pre-wrap;overflow:auto;max-height:120px">' + escHtml(preview) + '</div>';
+      } else if (result.status === 402 && !result.paymentMade) {
+        el3.innerHTML =
+          '<div style="color:var(--orange);font-size:9px;margin-bottom:6px">⚡ Payment required</div>' +
+          '<div class="aut-detail"><span>URL</span><span style="font-size:8px;word-break:break-all">' + escHtml(url) + '</span></div>' +
+          '<div style="color:var(--muted2);font-size:9px;margin-top:4px">' + escHtml(result.error || 'Resource requires payment. Check your Gateway Wallet balance.') + '</div>';
+      } else {
+        el3.innerHTML =
+          '<div style="color:var(--red);font-size:9px;margin-bottom:6px">✗ Failed</div>' +
+          '<div style="color:var(--muted2);font-size:9px">' + escHtml(result.error || 'Unknown error') + '</div>';
+      }
+    })();
+
+    return pendingHtml;
   }
 
   function _cardHtml(title, body, icon, color) {
@@ -557,8 +762,9 @@
 
   // ── Public API ──────────────────────────────────────────
   window.AutonomaLLM = {
-    VERSION: '1.2.0',
+    VERSION: '1.3.0',
     ask: ask,
-    isAvailable: isAvailable
+    isAvailable: isAvailable,
+    clearHistory: clearHistory
   };
 })();

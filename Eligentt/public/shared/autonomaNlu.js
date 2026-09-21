@@ -17,7 +17,7 @@
   };
 
   var CHAINS = {
-    'arc': { name: 'Arc Testnet', aliases: ['arc','testnet','arc testnet'] },
+    'arc': { name: 'Arc Mainnet', aliases: ['arc','arc mainnet','mainnet arc'] },
     'ethereum': { name: 'Ethereum', aliases: ['ethereum','eth','sepolia','mainnet'] },
     'base': { name: 'Base', aliases: ['base','base sepolia'] },
     'arbitrum': { name: 'Arbitrum', aliases: ['arbitrum','arb','arbitrum sepolia'] },

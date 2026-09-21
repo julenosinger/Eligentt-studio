@@ -12,8 +12,6 @@ const ElligenteFees = Object.freeze({
   MULTISEND_FEE_BPS:   20,
   STANDARD_BRIDGE_FEE_RATE: 0.0005,
   XC_STANDARD_FEE_RATE: 0.001,
-  SINGLE_SEND_FEE:     0.005,
-
   BTC_USD_PRICE:       67000,
   EURC_USD_RATE:       1.08,
 
