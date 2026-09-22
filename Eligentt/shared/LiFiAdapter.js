@@ -28,7 +28,7 @@
 
   var API = '/api/lifi/quote';
   var STATUS_API = '/api/lifi/status';
-  var QUOTE_TTL_MS = 60000; // conservative freshness window (ms)
+  var QUOTE_TTL_MS = 30000; // 30s freshness window — reduces stale-quote execution risk
 
   function _postJson(path, body) {
     return fetch(path, {

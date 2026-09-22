@@ -273,11 +273,108 @@
     }
   ];
 
+  /* ── Conversation history for multi-turn context ─────────────── */
+  var _conversationHistory = [];
+  var HISTORY_MAX = 12; // keep last 6 user+assistant pairs
+
+  function _addToHistory(role, content) {
+    _conversationHistory.push({ role: role, content: content });
+    if (_conversationHistory.length > HISTORY_MAX) {
+      _conversationHistory = _conversationHistory.slice(_conversationHistory.length - HISTORY_MAX);
+    }
+  }
+
+  function clearHistory() {
+    _conversationHistory = [];
+  }
+
+  /* ── Live blockchain context injected into every system prompt ─ */
+  function _buildLiveContext() {
+    var lines = [];
+    try {
+      // Wallet state
+      var addr = (typeof window !== 'undefined' && window.walletAddress) ? window.walletAddress : null;
+      var chainId = (typeof window !== 'undefined' && window.activeChainId) ? window.activeChainId : 5042;
+      var walletType = (typeof window !== 'undefined' && window.activeWalletType) ? window.activeWalletType : 'external';
+      lines.push('CURRENT WALLET STATE:');
+      lines.push('- Connected: ' + (addr ? 'yes' : 'no'));
+      if (addr) lines.push('- Address: ' + addr);
+      lines.push('- Chain ID: ' + chainId + (chainId === 5042 ? ' (Arc Mainnet)' : ''));
+      lines.push('- Wallet type: ' + walletType);
+
+      // Balances from DOM (real, not mocked)
+      var usdcEl = (typeof document !== 'undefined') ? document.getElementById('sb-bal') : null;
+      var eurcEl = (typeof document !== 'undefined') ? document.getElementById('sb-eurc-bal') : null;
+      var btcEl  = (typeof document !== 'undefined') ? document.getElementById('sb-btc-bal') : null;
+      if (usdcEl || eurcEl || btcEl) {
+        lines.push('- Balances (live):');
+        if (usdcEl && usdcEl.textContent && usdcEl.textContent !== '—') lines.push('  USDC: ' + usdcEl.textContent.trim());
+        if (eurcEl && eurcEl.textContent && eurcEl.textContent !== '—') lines.push('  EURC: ' + eurcEl.textContent.trim());
+        if (btcEl  && btcEl.textContent  && btcEl.textContent  !== '—') lines.push('  cirBTC: ' + btcEl.textContent.trim());
+      }
+
+      // Agent wallet
+      var AWM = (typeof window !== 'undefined' && window.AgentWalletManager) ? window.AgentWalletManager : null;
+      if (AWM && typeof AWM.getAgentAddress === 'function') {
+        var agentAddr = AWM.getAgentAddress();
+        if (agentAddr) lines.push('- Agent wallet: ' + agentAddr);
+      }
+
+      // Financial OS context
+      var FC = (typeof window !== 'undefined' && window.FinancialContext) ? window.FinancialContext : null;
+      if (FC && typeof FC.getSnapshot === 'function') {
+        try {
+          var snap = FC.getSnapshot();
+          if (snap && snap.balance && snap.balance.totalUsd) {
+            lines.push('- Portfolio total (USD): $' + snap.balance.totalUsd.toFixed(2));
+          }
+          if (snap && snap.schedules && snap.schedules.active) {
+            lines.push('- Active scheduled payments: ' + snap.schedules.active);
+          }
+        } catch (_e) {}
+      }
+
+      // Contacts summary
+      var contacts = null;
+      try {
+        if (typeof window !== 'undefined' && window.ContactsHub && typeof window.ContactsHub.getAll === 'function') {
+          contacts = window.ContactsHub.getAll();
+        } else if (typeof window !== 'undefined' && window._contacts && typeof window._contacts === 'function') {
+          contacts = window._contacts();
+        }
+      } catch (_e) {}
+      if (contacts && contacts.length) {
+        lines.push('- Saved contacts (' + contacts.length + '): ' + contacts.slice(0, 8).map(function(c){ return c.name + ' (' + (c.addr || c.address || '').slice(0, 8) + '...)'; }).join(', '));
+      }
+
+      // Pending tx
+      var pendingEl = (typeof document !== 'undefined') ? document.querySelector('[id*="pending-tx"], [class*="pending-tx"]') : null;
+      if (pendingEl && pendingEl.textContent) lines.push('- Pending transaction: yes');
+
+    } catch (_ex) {}
+
+    if (lines.length <= 1) return ''; // only header, no data
+    return '\n\n' + lines.join('\n');
+  }
+
   function _buildMessages(userMsg) {
-    return [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userMsg }
-    ];
+    var liveCtx = _buildLiveContext();
+    var systemWithCtx = SYSTEM_PROMPT + liveCtx +
+      '\n\nCONVERSATION RULES:\n' +
+      '- Remember what the user said earlier in this conversation. Do NOT ask again for info already provided.\n' +
+      '- If the user says "do it", "go ahead", "confirm", "yes" or similar after a plan was explained, execute it.\n' +
+      '- If info is missing and already in context above, use it — do not ask again.\n' +
+      '- Respond in the same language the user writes in (English or Portuguese).\n' +
+      '- For read-only queries (balance, history, status), answer directly without calling a function.\n' +
+      '- For financial actions, always explain what you will do BEFORE calling a function.';
+
+    var messages = [{ role: 'system', content: systemWithCtx }];
+    // Inject conversation history for multi-turn
+    for (var i = 0; i < _conversationHistory.length; i++) {
+      messages.push(_conversationHistory[i]);
+    }
+    messages.push({ role: 'user', content: userMsg });
+    return messages;
   }
 
   async function _callDeepSeek(messages, tools) {
@@ -328,13 +425,21 @@
     var choice = result.choices[0];
     var msg = choice.message;
 
+    // Save user message to history
+    _addToHistory('user', userMsg);
+
     // Tool call response — route to existing handlers
     if (msg.tool_calls && msg.tool_calls.length > 0) {
-      return _handleToolCall(msg.tool_calls[0]);
+      var toolResult = _handleToolCall(msg.tool_calls[0]);
+      // Save tool call intent as assistant message in history (text summary)
+      _addToHistory('assistant', '[Action: ' + msg.tool_calls[0].function.name + ']');
+      return toolResult;
     }
 
     // Direct text response
     if (msg.content && msg.content.trim()) {
+      // Save assistant response to history
+      _addToHistory('assistant', msg.content.trim());
       return _formatTextResponse(msg.content);
     }
 
@@ -657,8 +762,9 @@
 
   // ── Public API ──────────────────────────────────────────
   window.AutonomaLLM = {
-    VERSION: '1.2.0',
+    VERSION: '1.3.0',
     ask: ask,
-    isAvailable: isAvailable
+    isAvailable: isAvailable,
+    clearHistory: clearHistory
   };
 })();

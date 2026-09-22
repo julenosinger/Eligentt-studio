@@ -24,7 +24,7 @@ function evalModule(src, win) {
 }
 
 function makeWindow() {
-  return { TowerAdapter: undefined, LocalAdapter: undefined, SwapAggregator: undefined };
+  return { TowerAdapter: undefined, LocalAdapter: undefined, SwapAggregator: undefined, SwapMath: fakeSwapMath() };
 }
 
 function fakeSwapMath() {
@@ -38,7 +38,7 @@ function fakeSwapMath() {
 
 function towerQuote(src, over) {
   return Object.assign({
-    source: src, ok: true, tokenIn: 'USDC', tokenOut: 'EURC', chainId: 5042002,
+    source: src, ok: true, tokenIn: 'USDC', tokenOut: 'EURC', chainId: 5042,
     amountInRaw: 1000000n, expectedOutRaw: 1000000n, minOutRaw: 995000n,
     priceImpactBps: null, feeBps: null, route: null, calldata: null, to: null,
     spender: null, expiresAt: Date.now() + 60000, executionType: 'tower',
@@ -101,7 +101,7 @@ describe('SwapAggregator.getBestQuote — isolation + selection', () => {
   function evalAgg() {
     const w = makeWindow(); evalModule(aggSrc, w); return w.SwapAggregator;
   }
-  const opts = { tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 1000000n, slippageBps: 50, chainId: 5042002 };
+  const opts = { tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 1000000n, slippageBps: 50, chainId: 5042 };
 
   it('3. Tower offline → Local selecionada', async () => {
     globalThis.TowerAdapter = { getQuote: async () => ({ source: 'tower', ok: false, error: 'offline' }) };
@@ -197,7 +197,8 @@ describe('TowerAdapter.getQuote + validateResponse — external calldata safety'
       json: async () => ({ ok: true, data: { expectedOut: '1000000', minOut: '1', priceImpact: 0.5, feeBps: 25, calldata: '0xabcd', to: ADDR, spender: ADDR } }),
     });
     const t = evalTower();
-    const q = await t.getQuote({ tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 1000000n, slippageBps: 50 });
+    // Pass pre-resolved addresses so TOKEN_ADDRESS_UNRESOLVABLE is not triggered in test env
+    const q = await t.getQuote({ tokenIn: 'USDC', tokenOut: 'EURC', tokenInAddress: ADDR, tokenOutAddress: ADDR, amountInRaw: 1000000n, slippageBps: 50 });
     expect(q.ok).toBe(true);
     expect(q.source).toBe('tower');
     expect(q.expectedOutRaw).toBe(1000000n);
@@ -283,7 +284,7 @@ describe('SwapAggregator — Tower quoted for ALL pairs + strict validation', ()
   function evalAgg() {
     const w = makeWindow(); evalModule(aggSrc, w); return w.SwapAggregator;
   }
-  const opts = { tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 1000000n, slippageBps: 50, chainId: 5042002 };
+  const opts = { tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 1000000n, slippageBps: 50, chainId: 5042 };
   const ADDR = '0x2de8906a641d65d490bc60a4179d961d59742bcb';
 
   it('1/27. Tower é consultada mesmo quando existe pool local (hasLocalPool=true)', async () => {
@@ -341,7 +342,7 @@ describe('SwapAggregator — Tower quoted for ALL pairs + strict validation', ()
   });
 
   it('quote sem tokenIn (campo obrigatório ausente) → inválida', async () => {
-    globalThis.TowerAdapter = { getQuote: async () => ({ source: 'tower', ok: true, tokenOut: 'EURC', amountInRaw: 1000000n, chainId: 5042002, expectedOutRaw: 1000000n, minOutRaw: 995000n }) };
+    globalThis.TowerAdapter = { getQuote: async () => ({ source: 'tower', ok: true, tokenOut: 'EURC', amountInRaw: 1000000n, chainId: 5042, expectedOutRaw: 1000000n, minOutRaw: 995000n }) };
     globalThis.LocalAdapter = { getQuote: async () => towerQuote('local', { executable: true }) };
     const agg = evalAgg();
     const r = await agg.getBestQuote(opts);
@@ -396,7 +397,7 @@ describe('index.html — structural invariants', () => {
     expect(srcHtml).toContain("source = 'Elligentt Pool'");
     expect(srcHtml).toContain('agg.bestExecutable');
     expect(srcHtml).toContain('const hasLocalPool = !!(route && !route.noLiq)');
-    expect(srcHtml).toContain('chainId: 5042002');
+    expect(srcHtml).toContain('chainId: 5042');
     expect(srcHtml).toContain('resolveSelection');
     expect(srcHtml).toContain('SWP._towerQuoteData = selected.calldata ? selected : null');
   });

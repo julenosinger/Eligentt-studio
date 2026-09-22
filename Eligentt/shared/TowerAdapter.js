@@ -26,15 +26,16 @@
   if (typeof window !== 'undefined' && window.TowerAdapter) return;
 
   var API = '/api/tower/swap-quote';
-  var QUOTE_TTL_MS = 60000; // conservative freshness window (ms)
+  var QUOTE_TTL_MS = 30000; // 30s freshness window — reduces stale-quote execution risk
 
   // Tower Exchange integrates Arc. Quote on Arc Mainnet (5042) and Arc Testnet
   // (5042002). Any other chain must NOT quote (no stale Testnet leakage, no
   // unsupported chain calls). Defaults to Arc when no active chain is set.
   function _isArcActive() {
     try {
-      if (typeof activeChainId === 'undefined') return true;
+      if (typeof activeChainId === 'undefined' || activeChainId === null) return true; // boot race: allow, fail later on token resolution
       var id = Number(activeChainId);
+      if (!Number.isFinite(id) || id <= 0) return true; // unparseable: allow
       return id === 5042 || id === 5042002;
     } catch (_) { return true; }
   }
