@@ -15,7 +15,7 @@
  */
 const TOWER_BASE = 'https://www.tower.exchange/api/public';
 
-const DEFAULT_ALLOWED_ORIGINS = 'https://elligente.pages.dev,https://elligentt.xyz,https://execdaat.xyz';
+const DEFAULT_ALLOWED_ORIGINS = 'https://elligente.pages.dev,https://elligentt.xyz,https://execdaat.xyz,https://studiotestelligentt.pages.dev,https://preview.studiotestelligentt.pages.dev';
 
 // Tower normalizes amounts to 18 decimals. Elligentt's token registry uses native
 // decimals (USDC/EURC = 6, cirBTC = 8). We scale output amounts back to native
@@ -126,12 +126,15 @@ export async function onRequestPost(context) {
   const q = quoteRes.data.data;
 
   // Normalize to generic field names the frontend adapter consumes.
+  // outputToken: preserve the address the CLIENT requested (Tower may normalize
+  // addresses internally — using Tower's returned address would cause a QUOTE_MISMATCH
+  // in the SwapAggregator validateAgainst check).
   const data = {
-    inputToken: q.inputToken || null,
-    outputToken: q.outputToken || null,
+    inputToken: String(inputToken).toLowerCase(),
+    outputToken: String(outputToken).toLowerCase(),
     inputAmount: q.inputAmount != null ? String(q.inputAmount) : null,
-    expectedOut: scaleToNative(q.outputAmount, q.outputToken),
-    minOut: scaleToNative(q.minOut, q.outputToken),
+    expectedOut: scaleToNative(q.outputAmount != null ? q.outputAmount : q.expectedOut, outputToken),
+    minOut: scaleToNative(q.minOut, outputToken),
     priceImpact: q.priceImpact != null ? q.priceImpact : null,
     gasEstimate: q.gasEstimate != null ? String(q.gasEstimate) : null,
     feeBps: q.feeBps != null ? q.feeBps : null,
@@ -145,24 +148,29 @@ export async function onRequestPost(context) {
     approval: null,
   };
 
-  // ── 2. Unsigned swap tx (only when a user address is present) ─────
-  if (userAddress) {
-    try {
-      const txRes = await towerFetch(env, '/swap/build-tx', { quote: q, userAddress });
-      if (txRes.configured && txRes.status === 200 && txRes.data && txRes.data.success === true && txRes.data.data && txRes.data.data.swap) {
-        const s = txRes.data.data.swap;
-        if (isAddress(s.to) && s.data && /^0x[0-9a-fA-F]+$/.test(s.data)) {
-          data.calldata = s.data;
-          data.to = String(s.to).toLowerCase();
-          data.spender = String(s.to).toLowerCase(); // TowerSwapExecutor is the approve target
-          data.value = s.value != null ? String(s.value) : '0';
-          data.swapGasLimit = s.gasLimit != null ? String(s.gasLimit) : null;
-        }
-        data.approval = txRes.data.data.approval || null;
+  // ── 2. Unsigned swap tx — always attempt build-tx (Tower accepts without userAddress) ─
+  // When userAddress is absent Tower still returns calldata (no personal address needed
+  // for approval-less pairs). When present, Tower returns approval fields too.
+  try {
+    const buildBody = userAddress ? { quote: q, userAddress } : { quote: q };
+    const txRes = await towerFetch(env, '/swap/build-tx', buildBody);
+    if (txRes.configured && txRes.status === 200 && txRes.data && txRes.data.success === true && txRes.data.data) {
+      const td = txRes.data.data;
+      const s = td.swap || td.transaction || td;
+      const toAddr = s.to || s.contractAddress || null;
+      const calldataHex = s.data || s.calldata || null;
+      if (isAddress(toAddr) && calldataHex && /^0x[0-9a-fA-F]+$/.test(calldataHex)) {
+        data.calldata = calldataHex;
+        data.to = String(toAddr).toLowerCase();
+        data.spender = String(toAddr).toLowerCase();
+        data.value = s.value != null ? String(s.value) : '0';
+        data.swapGasLimit = s.gasLimit != null ? String(s.gasLimit) : (s.gas != null ? String(s.gas) : null);
       }
-    } catch (_) {
-      // build-tx is optional — quote alone is still valid (execution falls back).
+      data.approval = td.approval || null;
     }
+  } catch (_) {
+    // build-tx is optional — quote alone is still valid (execution falls back to
+    // re-quoting with userAddress at execution time).
   }
 
   return json({ ok: true, data }, 200, env, request);

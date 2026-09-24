@@ -63,7 +63,7 @@
     monthlyUsd: 10000,
     allowedTokens: ['USDC', 'EURC'],
     allowedOps: ['payment', 'transfer', 'recurring', 'payroll', 'multisend', 'swap', 'bridge', 'crosschain', 'treasury'],
-    allowedNetworks: ['Arc_Testnet'],
+    allowedNetworks: ['Arc_Mainnet'],
     hourStart: 0,
     hourEnd: 24
   }, lsLoad(K.limits, {}));
@@ -134,7 +134,7 @@
   function arcTokens() {
     try {
       if (typeof CHAIN_REGISTRY !== 'undefined') {
-        var cid = (typeof getActiveChain === 'function' && getActiveChain() && getActiveChain().chainId) || 5042002;
+        var cid = (typeof getActiveChain === 'function' && getActiveChain() && getActiveChain().chainId) || 5042;
         var c = CHAIN_REGISTRY[cid];
         if (c && c.tokens) return c.tokens;
       }
@@ -213,7 +213,7 @@
     try {
       if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.ARC_RPC) return AgentWalletManager.ARC_RPC;
     } catch (_e) { /* ignore */ }
-    return 'https://rpc.testnet.arc.io';
+    return 'https://rpc.arc.io';
   }
   function getProvider() {
     if (typeof ethers === 'undefined') return null;
@@ -276,7 +276,7 @@
     var net = NETWORKS[it.network];
     var chainAllowed = !!net && limits.allowedNetworks.indexOf(it.network) !== -1;
     add('Chain', chainAllowed, chainAllowed ? net.label + ' (' + net.chainId + ') allowed' : 'Network "' + it.network + '" not in allowed list');
-    var execOnArc = it.network === 'Arc_Testnet';
+    var execOnArc = it.network === 'Arc_Mainnet' || it.network === 'Arc_Testnet';
     add('Execution Chain', execOnArc || OP_TO_SCHED[it.op] === 'bridge' || OP_TO_SCHED[it.op] === 'crosschain',
       execOnArc ? 'Agent executes on Arc' : 'Cross-chain ops route via existing bridge executor');
     doneStage('Chain', chainAllowed, '');
@@ -322,7 +322,7 @@
         } else {
           var av = AgentAuthorization.validateExecution({
             operation: authOp, amount: Number(it.amount) || 0, asset: it.token,
-            network: (net && net.label) || 'Arc Testnet', contract: '', destination: it.to || ''
+            network: (net && net.label) || 'Arc Mainnet', contract: '', destination: it.to || ''
           });
           add('Permission Engine', !!(av && av.valid), (av && av.reason) || (av && av.valid ? 'Authorized' : 'Denied by authorization scope'));
           doneStage('Permission Engine', !!(av && av.valid), av && av.reason ? av.reason : '');
@@ -339,7 +339,7 @@
       try {
         var risk = RiskEngine.analyze({
           operation: OP_TO_AUTH[it.op] || it.op, amount: Number(it.amount) || 0, asset: it.token,
-          contract: '', destination: it.to || '', network: (net && net.label) || 'Arc Testnet', purpose: it.name || ''
+          contract: '', destination: it.to || '', network: (net && net.label) || 'Arc Mainnet', purpose: it.name || ''
         });
         var order = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
         var ok = order[risk.level] <= order[settings.maxRisk];
@@ -357,7 +357,7 @@
     nextStage('Policy Engine', 'Running policy checks');
     if (typeof PolicyEngine !== 'undefined') {
       try {
-        var pv = PolicyEngine.quickCheck(OP_TO_AUTH[it.op] || it.op, Number(it.amount) || 0, it.token, (net && net.label) || 'Arc Testnet');
+        var pv = PolicyEngine.quickCheck(OP_TO_AUTH[it.op] || it.op, Number(it.amount) || 0, it.token, (net && net.label) || 'Arc Mainnet');
         var failed = (pv && pv.failedRules) ? pv.failedRules.map(function (r) { return r.rule; }).join(', ') : '';
         add('Policy Engine', !!(pv && pv.valid), pv && pv.valid ? 'All policy rules passed' : 'Failed: ' + failed);
         doneStage('Policy Engine', !!(pv && pv.valid), '');
@@ -678,8 +678,8 @@
       token: String(raw.token || 'USDC').toUpperCase(),
       to: String(raw.to || ''),
       recipients: Array.isArray(raw.recipients) ? raw.recipients : [],
-      network: String(raw.network || 'Arc_Testnet'),
-      toNetwork: String(raw.toNetwork || 'Base_Sepolia'),
+      network: String(raw.network || 'Arc_Mainnet'),
+      toNetwork: String(raw.toNetwork || 'Base'),
       swapToToken: raw.swapToToken || undefined,
       freq: String(raw.freq || 'once'),
       startAt: raw.startAt || null,
@@ -841,6 +841,21 @@
           });
         }
       } catch (_e) {}
+      // Push confirmation bubble to the AI Smart Wallet financial assistant chat
+      try {
+        var _txH = latestHist ? latestHist.txHash : null;
+        var _explorerBase = (typeof CHAIN_REGISTRY !== 'undefined' && CHAIN_REGISTRY[5042] && CHAIN_REGISTRY[5042].explorer) ? CHAIN_REGISTRY[5042].explorer : 'https://explorer.arc.io';
+        var _txLink = (_txH && /^0x[0-9a-fA-F]{64}$/.test(_txH))
+          ? ' · <a href="' + _explorerBase + '/tx/' + _txH + '" target="_blank" rel="noopener" style="color:var(--blue)">' + _txH.slice(0,8) + '…' + _txH.slice(-4) + '</a>'
+          : '';
+        var _signerLabel = (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode && SecureSignerProvider.isCircleMode()) ? ' via <b style="color:var(--green)">Circle Wallet</b>' : ' via Agent Wallet';
+        asstPush('ai',
+          '<i class="ti ti-circle-check" style="color:var(--green);margin-right:4px"></i>' +
+          '<b style="color:var(--green)">Executed</b> ' + esc(String(it.amount)) + ' ' + esc(it.token) +
+          (it.to ? ' → <code style="font-size:8.5px">' + esc(it.to.slice(0,6)+'…'+it.to.slice(-4)) + '</code>' : '') +
+          _signerLabel + _txLink
+        );
+      } catch (_e) {}
     }
     renderScheduled();
   }
@@ -968,8 +983,8 @@
     const meta = arcTokens()[token];
     if (!meta) { notify('Token not supported on Arc', 'error'); return false; }
     try {
-      try { if (typeof ensureNetwork === 'function') { var _arcTarget = (typeof arcTargetChainId === 'function') ? arcTargetChainId() : 5042002; await ensureNetwork(_arcTarget); } } catch (_e) { /* wallet may reject */ }
-      try { if (typeof activeChainId !== 'undefined' && !(Number(activeChainId) === 5042002 || Number(activeChainId) === 5042)) { notify('Switch your wallet to Arc first', 'error'); return false; } } catch (_e) { /* ignore */ }
+      try { if (typeof ensureNetwork === 'function') { var _arcTarget = (typeof arcTargetChainId === 'function') ? arcTargetChainId() : 5042; await ensureNetwork(_arcTarget); } } catch (_e) { /* wallet may reject */ }
+      try { if (typeof activeChainId !== 'undefined' && !(Number(activeChainId) === 5042)) { notify('Switch your wallet to Arc Mainnet first', 'error'); return false; } } catch (_e) { /* ignore */ }
       const c = new ethers.Contract(meta.address, ERC20_ABI, userSigner);
       // [A6 FIX] Gas limit enforcement
       var gasCheck = await _estimateGasSafe(c, 'transfer', [agent, ethers.parseUnits(String(amount), meta.decimals || 6)]);
@@ -1035,7 +1050,7 @@
     const hint = $id('aiw-fund-hint');
     if (hint) {
       const map = {
-        deposit: 'Personal Wallet → AI Smart Wallet. Signed by your connected wallet on Arc Testnet.',
+        deposit: 'Personal Wallet → AI Smart Wallet. Signed by your connected wallet on Arc Mainnet.',
         withdraw: 'AI Smart Wallet → your Personal Wallet. Signed by the Agent Wallet.',
         transfer: 'AI Smart Wallet → any address on Arc. Blocked while Emergency Stop is active.',
         vault: 'AI Smart Wallet → Treasury Vault (' + (vaultAddress() ? short(vaultAddress()) : 'unavailable') + '). Vault → AI flows are managed on the Treasury page.'
@@ -1162,7 +1177,7 @@
       dailyLimit: dailyLimit || null,
       durationMs: hours * 3600000,
       allowedTokens: tokens.length ? tokens : ['USDC'],
-      allowedNetworks: ['Arc Testnet'],
+      allowedNetworks: ['Arc Mainnet'],
       maxRiskLevel: settings.maxRisk,
       timeWindow: (limits.hourStart > 0 || limits.hourEnd < 24) ? { start: limits.hourStart, end: limits.hourEnd } : null,
       purpose: 'AI Smart Wallet grant (max tx ' + (maxTx || '—') + ')',
@@ -1244,6 +1259,34 @@
       pauseBtn.style.color = paused ? 'var(--green)' : 'var(--yellow)';
       pauseBtn.style.borderColor = paused ? 'rgba(34,197,94,.4)' : 'rgba(245,158,11,.4)';
     }
+    /* ── Circle Signer toggle state ── */
+    const signerBadge = $id('aiw-signer-badge');
+    const signerStatus = $id('aiw-signer-status');
+    const signerBrowserBtn = $id('aiw-signer-browser-btn');
+    const signerCircleBtn = $id('aiw-signer-circle-btn');
+    if (signerBadge) {
+      var spMode = (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.getMode) ? SecureSignerProvider.getMode() : 'browser';
+      var spCircle = spMode === 'circle';
+      signerBadge.innerHTML = spCircle
+        ? '<span style="font-size:8px;padding:2px 7px;border-radius:10px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:var(--green)"><i class="ti ti-brand-circle" style="font-size:9px;margin-right:3px"></i>Circle</span>'
+        : '<span style="font-size:8px;padding:2px 7px;border-radius:10px;background:rgba(99,179,237,.12);border:1px solid rgba(99,179,237,.3);color:#60a5fa"><i class="ti ti-device-desktop" style="font-size:9px;margin-right:3px"></i>Browser</span>';
+      if (signerBrowserBtn) { signerBrowserBtn.style.borderColor = !spCircle ? 'rgba(99,179,237,.5)' : ''; signerBrowserBtn.style.color = !spCircle ? '#60a5fa' : ''; }
+      if (signerCircleBtn) { signerCircleBtn.style.borderColor = spCircle ? 'rgba(34,197,94,.5)' : ''; signerCircleBtn.style.color = spCircle ? 'var(--green)' : ''; }
+      /* Check Circle availability */
+      if (spCircle && signerStatus) {
+        fetch('/api/agent-signer/config', { method: 'GET' })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (signerStatus) signerStatus.textContent = d.available
+              ? '✓ Circle Wallet configured · ' + (d.address ? d.address.slice(0,6)+'…'+d.address.slice(-4) : '') + ' · Chain ' + (d.chainId || 5042)
+              : '⚠ Circle Wallet not configured — set CIRCLE_API_KEY and CIRCLE_ENTITY_SECRET in Cloudflare Secrets';
+          })
+          .catch(function() { if (signerStatus) signerStatus.textContent = '⚠ Cannot reach Circle signer endpoint'; });
+      } else if (signerStatus) {
+        signerStatus.textContent = 'Browser wallet uses the local encrypted agent key.';
+      }
+    }
+
     const sess = $id('aiw-sec-session');
     if (sess) {
       let html = '';
@@ -1468,7 +1511,7 @@
     if (stepEl) stepEl.textContent = 'Step ' + wiz.step + ' of 6';
     const opBal = wiz.amount - wiz.locked - wiz.automation - wiz.treasury;
     const steps = {
-      1: '<div class="swap-label">Select Asset</div><select class="cinput" id="aiw-wiz-asset" style="width:100%;cursor:pointer"><option' + (wiz.asset === 'USDC' ? ' selected' : '') + '>USDC</option><option' + (wiz.asset === 'EURC' ? ' selected' : '') + '>EURC</option><option' + (wiz.asset === 'cirBTC' ? ' selected' : '') + '>cirBTC</option></select><div style="font-size:8.5px;color:var(--muted2);margin-top:6px">USDC and EURC are the primary assets. Deposits run on Arc Testnet.</div>',
+      1: '<div class="swap-label">Select Asset</div><select class="cinput" id="aiw-wiz-asset" style="width:100%;cursor:pointer"><option' + (wiz.asset === 'USDC' ? ' selected' : '') + '>USDC</option><option' + (wiz.asset === 'EURC' ? ' selected' : '') + '>EURC</option><option' + (wiz.asset === 'cirBTC' ? ' selected' : '') + '>cirBTC</option></select><div style="font-size:8.5px;color:var(--muted2);margin-top:6px">USDC and EURC are the primary assets. Deposits run on Arc Mainnet.</div>',
       2: '<div class="swap-label">Enter Amount (' + esc(wiz.asset) + ')</div><input class="cinput" id="aiw-wiz-amount" type="number" min="0" step="0.01" value="' + (wiz.amount || '') + '" placeholder="0.00" style="width:100%"/>',
       3: '<div class="swap-label">Allocate Funds (' + esc(String(wiz.amount)) + ' ' + esc(wiz.asset) + ')</div>' +
         '<div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">' +
@@ -1544,7 +1587,7 @@
           '<div style="display:flex;gap:7px;align-items:flex-end;margin-top:7px;flex-wrap:wrap">' +
           '<div><div class="swap-label">Min Reserve (USDC)</div><input class="cinput" id="aiw-gas-minreserve" type="number" min="0" step="0.1" value="' + gasCfg.minReserve + '" style="width:90px"/></div>' +
           '<button class="btn" style="font-size:9px" onclick="AIWallet.saveGasCfg()">Save</button>' +
-          '<span style="font-size:8px;color:var(--muted2)">Supported chains: Arc Testnet (agent executes here) · cross-chain via existing Bridge</span></div>';
+          '<span style="font-size:8px;color:var(--muted2)">Supported chains: Arc Mainnet (agent executes here) · cross-chain via existing Bridge</span></div>';
       });
     }
     const tb = $id('aiw-topup-body');
@@ -1868,7 +1911,7 @@
     const cand = {
       op: op, name: 'simulation', amount: amount, token: token, to: to,
       recipients: to ? [{ addr: to, amount: amount }] : [],
-      network: 'Arc_Testnet', toNetwork: 'Base_Sepolia', freq: op === 'recurring' ? 'monthly' : 'once',
+      network: 'Arc_Mainnet', toNetwork: 'Base', freq: op === 'recurring' ? 'monthly' : 'once',
       source: 'simulation', nonce: nonceCounter + 1, deadline: Date.now() + 900000
     };
     const res = await validateIntent(cand);
@@ -1978,7 +2021,7 @@
     }
     pushHistory({ kind: 'profile', status: 'applied', reason: p.label });
     if (p.grant) {
-      const g = Object.assign({ allowedTokens: limits.allowedTokens.slice(), allowedNetworks: ['Arc Testnet'], purpose: 'Profile: ' + p.label }, p.grant);
+      const g = Object.assign({ allowedTokens: limits.allowedTokens.slice(), allowedNetworks: ['Arc Mainnet'], purpose: 'Profile: ' + p.label }, p.grant);
       queueApproval('permission_change', p.label + ' profile — permission grant',
         'Grant: cap ' + fmtUsd(g.maxSpending) + ' · daily ' + fmtUsd(g.dailyLimit) + ' · ' + Math.round(g.durationMs / 3600000) + 'h · risk ≤ ' + g.maxRiskLevel + '. Requires your explicit approval.',
         { grantOpts: g });
@@ -2285,12 +2328,12 @@
     }
     if (/(send|pay|enviar|pagar|transfer)/.test(m) && amt) {
       if (!addr) { asstPush('ai', 'I need a destination address (0x…) to create the payment intent.'); return; }
-      const id = submitIntent({ op: 'payment', name: 'assistant payment', amount: amt, token: token, to: addr, network: 'Arc_Testnet', freq: 'once', source: 'financial-assistant' });
+      const id = submitIntent({ op: 'payment', name: 'assistant payment', amount: amt, token: token, to: addr, network: 'Arc_Mainnet', freq: 'once', source: 'financial-assistant' });
       asstPush('ai', id ? 'Intent <b>' + esc(id) + '</b> created: ' + amt + ' ' + esc(token) + ' → ' + esc(short(addr)) + '. It is passing the full validation pipeline; execution requires approval in the <b>Approval Center</b>.' : 'Intent rejected (Emergency Stop).');
       return;
     }
     if (/simulat|simular/.test(m) && amt) {
-      const cand = { op: /payroll|multisend/.test(m) ? 'multisend' : 'payment', name: 'assistant simulation', amount: amt, token: token, to: addr || '', recipients: addr ? [{ addr: addr, amount: amt }] : [], network: 'Arc_Testnet', toNetwork: 'Base_Sepolia', freq: 'once', source: 'simulation', nonce: nonceCounter + 1, deadline: Date.now() + 900000 };
+      const cand = { op: /payroll|multisend/.test(m) ? 'multisend' : 'payment', name: 'assistant simulation', amount: amt, token: token, to: addr || '', recipients: addr ? [{ addr: addr, amount: amt }] : [], network: 'Arc_Mainnet', toNetwork: 'Base', freq: 'once', source: 'simulation', nonce: nonceCounter + 1, deadline: Date.now() + 900000 };
       asstPush('ai', 'Running read-only simulation…');
       validateIntent(cand).then(function (res) {
         const failed = res.checks.filter(function (c) { return !c.passed; });
@@ -2452,7 +2495,7 @@
     (wf.actions || []).forEach(function (a) {
       const base = ctx.amount || 0;
       const amount = a.isPercent ? +(base * (a.amount / 100)).toFixed(2) : a.amount;
-      if (a.type === 'create_intent') transactional.push({ type: 'create_intent', intent: { op: 'payment', name: 'workflow ' + wf.name, amount: amount, token: a.token || 'USDC', to: a.to, network: 'Arc_Testnet', freq: 'once', source: 'workflow' } });
+      if (a.type === 'create_intent') transactional.push({ type: 'create_intent', intent: { op: 'payment', name: 'workflow ' + wf.name, amount: amount, token: a.token || 'USDC', to: a.to, network: 'Arc_Mainnet', freq: 'once', source: 'workflow' } });
       else if (a.type === 'vault_allocate') { const ch = {}; ch[a.target || 'treasury'] = amount; transactional.push({ type: 'vault_allocate', token: a.token || 'USDC', changes: ch }); }
       else if (a.type === 'create_schedule') transactional.push({ type: 'create_schedule', sched: { type: 'payment', name: 'workflow ' + wf.name, token: a.token || 'USDC', amount: amount, address: a.to, recipients: [{ addr: a.to, amount: amount }], freq: a.freq || 'monthly', nextRun: new Date(Date.now() + 60000).toISOString(), status: 'Active' } });
       else if (a.type === 'generate_report') { generateReport('daily'); wfLog(wf.id, 'report generated'); }
@@ -2773,7 +2816,7 @@
       html += '</div>';
     });
     box.innerHTML = '<div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="st-lbl">Total Portfolio Value</span><span style="font-size:15px;font-weight:700;color:var(--green)">' + fmtUsd(total) + '</span></div>' + html +
-      '<div style="font-size:8px;color:var(--muted2)">Read-only · balances on Arc Testnet · updated ' + new Date(portfolioCache.at).toLocaleTimeString() + '</div>';
+      '<div style="font-size:8px;color:var(--muted2)">Read-only · balances on Arc Mainnet · updated ' + new Date(portfolioCache.at).toLocaleTimeString() + '</div>';
   }
 
   function statusColor(s) {
@@ -2924,7 +2967,7 @@
         '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Address</span><span style="color:var(--text);font-family:monospace">' + (addr ? esc(short(addr)) : 'not created') + '</span></div>' +
         '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Status</span><span style="color:' + (paused ? 'var(--yellow)' : 'var(--green)') + '">' + (paused ? 'Paused' : 'Active') + '</span></div>' +
         '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Reputation</span><span style="color:var(--text)">' + esc(String(rep)) + '</span></div>' +
-        '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Execution chain</span><span style="color:var(--text)">Arc Testnet · 5042002</span></div>' +
+        '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Execution chain</span><span style="color:var(--text)">Arc Mainnet · 5042</span></div>' +
         '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Supported chains</span><span style="color:var(--text)">' + (chains.length || 1) + '</span></div>' +
         '</div><div style="font-size:8px;color:var(--muted2);margin-top:7px">Managed by the existing AgentWalletManager. The AI Smart Wallet never stores or exports keys.</div>';
     } catch (e) {
@@ -3112,8 +3155,8 @@
       amount: amount,
       token: val('aiw-auto-token') || 'USDC',
       to: to,
-      network: 'Arc_Testnet',
-      toNetwork: val('aiw-auto-tonet') || 'Base_Sepolia',
+        network: 'Arc_Mainnet',
+      toNetwork: val('aiw-auto-tonet') || 'Base',
       swapToToken: op === 'swap' ? (val('aiw-auto-swapto') || 'EURC') : undefined,
       freq: val('aiw-auto-freq') || 'once',
       startAt: parseStartAt(val('aiw-auto-start')),
@@ -3244,6 +3287,17 @@
     toggleGrantOp: toggleGrantOp,
     grantPermission: grantPermission,
     revokeAllPerms: revokeAllPerms,
+    setSignerMode: function(mode) {
+      try {
+        if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.setMode) {
+          SecureSignerProvider.setMode(mode);
+          notify(mode === 'circle' ? 'Circle Wallet signer activated — transactions will be signed server-side.' : 'Browser Wallet signer activated.', 'success');
+        } else {
+          notify('SecureSignerProvider not available', 'error');
+        }
+      } catch(e) { notify('Could not switch signer: ' + (e.message || e), 'error'); }
+      renderSecurityCenter();
+    },
     /* security center */
     togglePauseAgent: togglePauseAgent,
     /* vault & gas (phase 3) */

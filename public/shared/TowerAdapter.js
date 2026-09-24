@@ -26,15 +26,16 @@
   if (typeof window !== 'undefined' && window.TowerAdapter) return;
 
   var API = '/api/tower/swap-quote';
-  var QUOTE_TTL_MS = 60000; // conservative freshness window (ms)
+  var QUOTE_TTL_MS = 30000; // 30s freshness window — reduces stale-quote execution risk
 
   // Tower Exchange integrates Arc. Quote on Arc Mainnet (5042) and Arc Testnet
   // (5042002). Any other chain must NOT quote (no stale Testnet leakage, no
   // unsupported chain calls). Defaults to Arc when no active chain is set.
   function _isArcActive() {
     try {
-      if (typeof activeChainId === 'undefined') return true;
+      if (typeof activeChainId === 'undefined' || activeChainId === null) return true; // boot race: allow, fail later on token resolution
       var id = Number(activeChainId);
+      if (!Number.isFinite(id) || id <= 0) return true; // unparseable: allow
       return id === 5042 || id === 5042002;
     } catch (_) { return true; }
   }
@@ -84,21 +85,48 @@
    * Never throws — failures return { ok:false, error }.
    * @param {object} opts { tokenIn, tokenOut, amountInRaw: bigint, slippageBps, userAddress? }
    */
+  // Resolve a token address from symbol or direct address.
+  // Falls back to the global TOKEN_REGISTRY / getTokenAddress if available.
+  function _resolveAddr(symOrAddr, chainId) {
+    if (symOrAddr && /^0x[0-9a-fA-F]{40}$/.test(symOrAddr)) return symOrAddr.toLowerCase();
+    try {
+      // opts.tokenInAddress / opts.tokenOutAddress carry pre-resolved addresses
+      // for non-Arc chains (from swpResolveToken in updateSwapRate).
+      if (typeof getTokenAddress === 'function') {
+        var a = getTokenAddress(symOrAddr);
+        if (a && /^0x[0-9a-fA-F]{40}$/.test(a)) return a.toLowerCase();
+      }
+      if (typeof getTokenAddressForChain === 'function') {
+        var a2 = getTokenAddressForChain(chainId || 5042, symOrAddr);
+        if (a2 && /^0x[0-9a-fA-F]{40}$/.test(a2)) return a2.toLowerCase();
+      }
+    } catch (_) {}
+    return null;
+  }
+
   async function getQuote(opts) {
     opts = opts || {};
     if (!_isArcActive()) {
       return { source: 'tower', ok: false, error: 'TOWER_CHAIN_UNSUPPORTED' };
     }
+    var chainId = opts.chainId || (typeof activeChainId !== 'undefined' ? Number(activeChainId) : 5042);
     var amountInRaw = opts.amountInRaw;
     var amountInStr = (typeof amountInRaw === 'bigint')
       ? amountInRaw.toString()
       : (opts.amountIn != null ? String(opts.amountIn) : null);
 
+    // Resolve token addresses (Tower API requires ERC-20 addresses, not symbols).
+    var tokenInAddr  = opts.tokenInAddress  || _resolveAddr(opts.tokenIn,  chainId);
+    var tokenOutAddr = opts.tokenOutAddress || _resolveAddr(opts.tokenOut, chainId);
+    if (!tokenInAddr || !tokenOutAddr) {
+      return { source: 'tower', ok: false, error: 'TOKEN_ADDRESS_UNRESOLVABLE' };
+    }
+
     var res;
     try {
       res = await fetchQuote({
-        tokenIn: opts.tokenIn,
-        tokenOut: opts.tokenOut,
+        tokenIn: tokenInAddr,
+        tokenOut: tokenOutAddr,
         amountIn: amountInStr,
         slippageBps: opts.slippageBps,
         userAddress: opts.userAddress,
@@ -136,8 +164,10 @@
     return {
       source: 'tower',
       ok: true,
-      tokenIn: opts.tokenIn || null,
-      tokenOut: opts.tokenOut || null,
+      tokenIn: opts.tokenIn || tokenInAddr || null,
+      tokenOut: opts.tokenOut || tokenOutAddr || null,
+      tokenInAddress: tokenInAddr,
+      tokenOutAddress: tokenOutAddr,
       chainId: (typeof activeChainId !== 'undefined' ? Number(activeChainId) : 5042),
       amountInRaw: (typeof amountInRaw === 'bigint') ? amountInRaw : null,
       expectedOutRaw: expectedOutRaw,

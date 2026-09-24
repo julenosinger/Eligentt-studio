@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Autonoma Agent Schedule Executor ÔÇö Delegated Scheduled-Intent Execution
  * Executes due ScheduleEngine intents on-chain through the existing Agent Wallet.
  * The Agent Wallet is the ONLY execution layer. The user's keys are never used.
@@ -10,7 +10,7 @@
  *   3. Underlying operation permission (allowPayments / allowSwap / allowBridge...)
  *   4. PolicyEngine.validateExecution (when loaded)
  *   5. RiskEngine level vs authorization maxRiskLevel (when loaded)
- *   6. Chain check (Arc Testnet 5042002), balance check, gas ceiling,
+ *   6. Chain check (Arc Mainnet 5042), balance check, gas ceiling,
  *      AgentWalletManager.validatePreExecution (TOCTOU + daily ops)
  *   7. eth_call simulation of every transfer before broadcast
  *   8. Persistent per-run ledger (schedId|nextRun) ÔÇö replay protection
@@ -29,7 +29,7 @@
   var LEDGER_KEY = 'elligentt_agent_sched_exec_v1';
   var NOTIF_KEY = 'elligentt_agent_sched_notifs_v1';
   var ENABLED_KEY = 'elligentt_agent_sched_enabled_v1';
-  var ARC_CHAIN_ID = 5042002;
+  var ARC_CHAIN_ID = 5042; // Arc Mainnet
   var TICK_MS = 30000;
   var MISS_WINDOW_MS = 24 * 60 * 60 * 1000;
   var TX_GAS_LIMIT = 120000;
@@ -48,8 +48,9 @@
   };
 
   var CCTP_FALLBACK_DOMAINS = {
-    Ethereum_Sepolia: 0, Base_Sepolia: 6, Arbitrum_Sepolia: 3,
-    Optimism_Sepolia: 2, Polygon_Amoy: 7
+    Ethereum: 0, Base: 6, Arbitrum: 3,
+    Optimism: 2, Polygon: 7,
+    Arc_Mainnet: 26
   };
 
   var _timer = null;
@@ -342,7 +343,7 @@
     var net;
     try { net = await provider.getNetwork(); } catch(e){ return { ok: false, reason: 'RPC unavailable: ' + (e.message || 'network error') }; }
     if (net && Number(net.chainId) !== ARC_CHAIN_ID) {
-      return { ok: false, reason: 'Wrong chain: expected Arc Testnet (' + ARC_CHAIN_ID + '), got ' + Number(net.chainId) };
+      return { ok: false, reason: 'Wrong chain: expected Arc Mainnet (' + ARC_CHAIN_ID + '), got ' + Number(net.chainId) };
     }
 
     if (sched.type === 'payment' || sched.type === 'multisend' || sched.type === 'swap') {
@@ -1066,10 +1067,10 @@
       fn = window._agentExecuteSwap;
       args = [v.total, v.token, sched.swapToToken || (v.token === 'USDC' ? 'EURC' : 'USDC'), 'sched_' + sched.id + '_' + Date.now()];
     } else if ((sched.type === 'bridge' || sched.type === 'crosschain') && typeof window !== 'undefined' && typeof window._agentExecuteBridge === 'function') {
-      var destNet = sched.toNetwork || 'Base_Sepolia';
+      var destNet = sched.toNetwork || 'Base';
       var domain = CCTP_FALLBACK_DOMAINS[destNet];
       try {
-        var netIds = { Ethereum_Sepolia: 11155111, Base_Sepolia: 84532, Arbitrum_Sepolia: 421614, Optimism_Sepolia: 11155420, Polygon_Amoy: 80002 };
+        var netIds = { Ethereum: 1, Base: 8453, Arbitrum: 42161, Optimism: 10, Polygon: 137 };
         if (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.CCTP_CONFIG && netIds[destNet] && ElligenteCCTP.CCTP_CONFIG[String(netIds[destNet])]) {
           domain = ElligenteCCTP.CCTP_CONFIG[String(netIds[destNet])].domain;
         }

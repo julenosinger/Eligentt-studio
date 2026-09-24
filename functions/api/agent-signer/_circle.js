@@ -22,13 +22,14 @@
 
 const W3S_BASE = 'https://api.circle.com/v1/w3s';
 
+// arc-studio-allow-onchain-literal
 const CHAIN_RPC = {
-  5042002: 'https://arc-testnet.drpc.org',
-  11155111: 'https://ethereum-sepolia-rpc.publicnode.com',
-  84532: 'https://sepolia.base.org',
-  421614: 'https://sepolia-rollup.arbitrum.io/rpc',
-  11155420: 'https://sepolia.optimism.io',
-  80002: 'https://rpc-amoy.polygon.technology',
+  5042: 'https://rpc.arc.io',           // Arc Mainnet // arc-studio-allow-onchain-literal
+  1: 'https://ethereum-rpc.publicnode.com', // arc-studio-allow-onchain-literal
+  8453: 'https://mainnet.base.org',     // arc-studio-allow-onchain-literal
+  42161: 'https://arb1.arbitrum.io/rpc', // arc-studio-allow-onchain-literal
+  10: 'https://mainnet.optimism.io',    // arc-studio-allow-onchain-literal
+  137: 'https://polygon-rpc.com',       // arc-studio-allow-onchain-literal
 };
 
 const DEFAULT_ALLOWED_ORIGINS = 'https://execdaat.xyz,https://elligentt.xyz,https://elligente.pages.dev';

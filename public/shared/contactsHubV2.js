@@ -14,6 +14,9 @@
 (function () {
   'use strict';
 
+  // Safe accessor — contacts is a global let defined in index.html
+  function _contacts() { return (typeof contacts !== 'undefined' && Array.isArray(contacts)) ? contacts : []; }
+
   var STORAGE_KEY = 'arcpay_contacts_v2';
   var v2Data = {};
   var activeContactId = null;
@@ -88,14 +91,14 @@
   function getActiveContact() {
     if (!activeContactId) { try { activeContactId = localStorage.getItem('elligentt_active_contact') || null; } catch (_) {} }
     if (!activeContactId) return null;
-    var c = contacts.find(function (x) { return x.id === activeContactId; });
+    var c = _contacts().find(function (x) { return x.id === activeContactId; });
     return c ? enrichContact(c) : null;
   }
   function clearActiveContact() { activeContactId = null; try { localStorage.removeItem('elligentt_active_contact'); } catch (_) {} }
 
   /* ── REAL TRANSACTION HISTORY PER CONTACT ─────────────────────────── */
   function getContactHistory(cid) {
-    var c = contacts.find(function (x) { return x.id === cid; });
+    var c = _contacts().find(function (x) { return x.id === cid; });
     if (!c || !c.addr) return { sent: 0, received: 0, count: 0, txs: [], lastTx: null };
     var addr = c.addr.toLowerCase();
     var txs = [];
@@ -146,7 +149,7 @@
 
   /* ── SCHEDULE PROFILE PER CONTACT ─────────────────────────────────── */
   function getContactSchedules(cid) {
-    var c = contacts.find(function (x) { return x.id === cid; });
+    var c = _contacts().find(function (x) { return x.id === cid; });
     if (!c || !c.addr) return { active: [], paused: [], completed: [], nextExecution: null };
     var addr = c.addr.toLowerCase();
     var all = [];
@@ -197,7 +200,7 @@
 
   /* ── ENHANCED DETAIL MODAL ────────────────────────────────────────── */
   function openContactCard(cid) {
-    var c = contacts.find(function (x) { return x.id === cid; });
+    var c = _contacts().find(function (x) { return x.id === cid; });
     if (!c) return;
     var enriched = enrichContact(c);
     var prefs = getPreferences(cid);
@@ -315,7 +318,7 @@
   function findByName(query) {
     if (!query) return null;
     var lower = query.toLowerCase();
-    var matches = contacts.filter(function (c) {
+    var matches = _contacts().filter(function (c) {
       var v2 = v2Data[c.id] || {};
       return c.name.toLowerCase().indexOf(lower) !== -1 ||
              (c.note && c.note.toLowerCase().indexOf(lower) !== -1) ||
@@ -328,7 +331,7 @@
   function findExact(name) {
     if (!name) return null;
     var lower = name.trim().toLowerCase();
-    var c = contacts.find(function (c) { return c.name.toLowerCase() === lower; });
+    var c = _contacts().find(function (c) { return c.name.toLowerCase() === lower; });
     return c ? enrichContact(c) : null;
   }
 
@@ -339,7 +342,7 @@
 
   function getGroupAddresses(groupName) {
     var lower = groupName.trim().toLowerCase();
-    return contacts.filter(function (c) {
+    return _contacts().filter(function (c) {
       var v2 = v2Data[c.id] || {};
       return (v2.groups || []).some(function (g) { return g.toLowerCase() === lower; });
     });
@@ -351,9 +354,9 @@
     var origSave = window.saveContact;
     if (origSave && !window.__contactsHubV2Patched) {
       window.saveContact = function () {
-        var prevLen = contacts.length;
+        var prevLen = _contacts().length;
         origSave();
-        if (contacts.length > prevLen) {
+        if (_contacts().length > prevLen) {
           var newContact = contacts[0];
           if (newContact && newContact.id) getV2(newContact.id);
         }
@@ -408,7 +411,7 @@
   }
 
   function getPayrollContacts() {
-    return contacts.filter(function (c) {
+    return _contacts().filter(function (c) {
       var v2 = v2Data[c.id] || {};
       return (v2.tags || []).indexOf('Payroll') !== -1 || v2.payroll;
     }).map(enrichContact);
@@ -438,7 +441,7 @@
 
   /* ── ANALYTICS ────────────────────────────────────────────────────── */
   function getAnalytics() {
-    var all = contacts.map(enrichContact);
+    var all = _contacts().map(enrichContact);
     var groups = {};
     all.forEach(function (c) {
       (c.groups || []).forEach(function (g) {
@@ -453,7 +456,7 @@
       if (c.history && c.history.nextScheduled) scheduledCount++;
     });
     return {
-      total: contacts.length,
+      total: _contacts().length,
       groups: Object.keys(groups).length,
       payrollRecipients: payrollCount,
       scheduledRecipients: scheduledCount,
@@ -519,7 +522,7 @@
         chain = CHAIN_MAP[chain.toLowerCase()] || chain;
       }
 
-      var existing = contacts.find(function (c) { return c.addr && c.addr.toLowerCase() === addr.toLowerCase(); });
+      var existing = _contacts().find(function (c) { return c.addr && c.addr.toLowerCase() === addr.toLowerCase(); });
       if (existing) {
         if (group) addToGroup(existing.id, group);
         if (type) { var v2 = getV2(existing.id); v2.tags = v2.tags || []; type.split(';').forEach(function (t) { t = t.trim(); if (t && v2.tags.indexOf(t) === -1) v2.tags.push(t); }); saveV2(); }
@@ -528,7 +531,7 @@
       }
 
       var c = { id: 'C' + Date.now() + added, name: name, addr: addr, note: notes, chainId: chain, favorite: false, lastUsed: new Date().toISOString() };
-      contacts.unshift(c);
+      if (typeof contacts !== 'undefined' && Array.isArray(contacts)) contacts.unshift(c); else _contacts().unshift(c);
       var v2 = getV2(c.id);
       if (type) { v2.tags = v2.tags || []; type.split(';').forEach(function (t) { t = t.trim(); if (t && v2.tags.indexOf(t) === -1) v2.tags.push(t); }); }
       if (group) addToGroup(c.id, group);
@@ -719,11 +722,12 @@
         var sub = document.querySelector('#page-recipients .page-sub');
         if (sub) sub.textContent = 'Financial Identity Layer · Contacts Hub V3';
       } catch (_) {}
-      console.log('[ContactsHubV2] Initialized — ' + contacts.length + ' contacts, ' + Object.keys(v2Data).length + ' enriched.');
+      console.log('[ContactsHubV2] Initialized — ' + _contacts().length + ' contacts, ' + Object.keys(v2Data).length + ' enriched.');
     }, 800);
   }, 200);
 
   /* ── EXPORTS ──────────────────────────────────────────────────────── */
+  window.quickSend = function(cid) { if (window.ContactsHub && window.ContactsHub.quickSend) window.ContactsHub.quickSend(cid); };
   window.ContactsHub = {
     enrichContact: enrichContact,
     findByName: findByName,

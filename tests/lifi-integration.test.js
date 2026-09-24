@@ -65,7 +65,7 @@ describe('Arc Mainnet + LI.FI — chain registry', () => {
   it('Arc Mainnet (5042) is registered with the official RPC/explorer', () => {
     const reg = html.slice(html.indexOf('const CHAIN_REGISTRY = {'), html.indexOf('const CHAINS = ['));
     expect(reg).toContain("chainId: 5042");
-    expect(reg).toContain("rpc: 'https://rpc.mainnet.arc.io'");
+    expect(reg).toContain("rpc: 'https://rpc.arc.io'");
     expect(reg).toContain("explorer: 'https://explorer.arc.io'");
   });
 

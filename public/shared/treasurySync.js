@@ -7,7 +7,7 @@
 (function(){
   'use strict';
 
-  var ARC_RPC = 'https://arc-testnet.drpc.org';
+  var ARC_RPC = 'https://rpc.arc.io';
   var TREASURY_VAULT = '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
   var CACHE_TTL_MS = 15000;
 

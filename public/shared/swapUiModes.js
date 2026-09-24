@@ -28,6 +28,7 @@
   var PROVIDER_META = {
     local: { id: 'local', name: 'Elligentt', type: 'AMM', sourceLabel: 'Local AMM' },
     tower: { id: 'tower', name: 'Tower', type: 'AGG', sourceLabel: 'Aggregator' },
+    lifi:  { id: 'lifi',  name: 'LI.FI',   type: 'AGG', sourceLabel: 'LI.FI Bridge' },
   };
 
   function getMode() { return _mode; }

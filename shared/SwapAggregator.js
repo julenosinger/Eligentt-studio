@@ -145,10 +145,23 @@
    * are MANDATORY — a quote missing any of them is INVALID (not comparable).
    * A stale (expired) quote is also rejected.
    */
+  // Token identity check: accept symbol match OR address match (case-insensitive).
+  // Tower normalizes token addresses server-side; we keep the client symbol in
+  // q.tokenIn/tokenOut so symbol comparison is the primary path.
+  function _tokenMatch(qTok, optsTok, qAddr, optsAddr) {
+    if (optsTok == null) return true;
+    if (qTok == null) return false;
+    // Exact string match (symbol or address)
+    if (String(qTok).toLowerCase() === String(optsTok).toLowerCase()) return true;
+    // Address fallback (when one side stored the address and the other a symbol)
+    if (qAddr && optsAddr && String(qAddr).toLowerCase() === String(optsAddr).toLowerCase()) return true;
+    return false;
+  }
+
   function validateAgainst(q, opts) {
     if (!q || q.ok !== true) return false;
-    if (opts.tokenIn != null && (q.tokenIn == null || String(q.tokenIn) !== String(opts.tokenIn))) return false;
-    if (opts.tokenOut != null && (q.tokenOut == null || String(q.tokenOut) !== String(opts.tokenOut))) return false;
+    if (!_tokenMatch(q.tokenIn,  opts.tokenIn,  q.tokenInAddress,  opts.tokenInAddress))  return false;
+    if (!_tokenMatch(q.tokenOut, opts.tokenOut, q.tokenOutAddress, opts.tokenOutAddress)) return false;
     if (opts.amountInRaw != null && (q.amountInRaw == null || String(q.amountInRaw) !== String(opts.amountInRaw))) return false;
     if (opts.chainId != null && (q.chainId == null || Number(q.chainId) !== Number(opts.chainId))) {
       // LI.FI quotes carry fromChainId/toChainId instead of chainId.
@@ -188,6 +201,8 @@
       ? LiFiAdapter.getQuote({
           tokenIn: opts.tokenIn,
           tokenOut: opts.tokenOut,
+          tokenInAddress:  opts.tokenInAddress  || null,
+          tokenOutAddress: opts.tokenOutAddress || null,
           amountInRaw: opts.amountInRaw,
           slippageBps: opts.slippageBps,
           fromChainId: opts.fromChainId != null ? Number(opts.fromChainId) : (opts.chainId != null ? Number(opts.chainId) : null),

@@ -506,46 +506,7 @@
     return card(ch('world', 'Network Breakdown'), rows);
   }
 
-  function renderBusinessHealth() {
-    var vault = collectVault();
-    var scheds = collectSchedules();
-    var invoices = collectInvoices();
-    var links = collectPaymentLinks();
-    var balance = (UB && UB.state) ? UB.state.totalUSD : 0;
-    var healthScore = 0;
-    if (balance > 0) healthScore += 25;
-    if (invoices.totalPending > 0) healthScore += 15;
-    if (scheds.active.length > 0) healthScore += 10;
-    if ((vault.treasury||0) > 0) healthScore += 15;
-    if (links.active.length > 0) healthScore += 10;
-    healthScore = Math.min(100, healthScore + 25);
 
-    var grade = healthScore >= 80 ? 'A' : healthScore >= 60 ? 'B' : healthScore >= 40 ? 'C' : healthScore >= 20 ? 'D' : 'F';
-    var gradeColor = healthScore >= 80 ? 'var(--green)' : healthScore >= 60 ? 'var(--teal)' : healthScore >= 40 ? 'var(--yellow)' : healthScore >= 20 ? 'var(--orange)' : 'var(--red)';
-
-    return card(
-      ch('heartbeat', 'Business Health'),
-      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">' +
-        '<div style="width:48px;height:48px;border-radius:50%;border:3px solid ' + gradeColor + ';display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:' + gradeColor + '">' + grade + '</div>' +
-        '<div><div style="font-size:12px;font-weight:700;color:var(--text)">Score: ' + healthScore + '/100</div><div style="font-size:8px;color:var(--muted2)">Based on: liquidity, obligations, receivables, treasury</div></div>' +
-      '</div>' +
-      kv('Liquidity (Balance)', fmtUSD(balance), balance > 0 ? 'var(--green)' : 'var(--red)') +
-      kv('Upcoming Obligations', String(scheds.active.length) + ' schedules', scheds.due.length > 0 ? 'var(--yellow)' : 'var(--green)') +
-      kv('Pending Receivables', String(invoices.pending.length + links.active.length) + ' items', invoices.totalPending > 0 ? 'var(--teal)' : 'var(--muted2)') +
-      kv('Treasury Status', (vault.treasury||0) > 0 ? 'Active' : 'Empty', (vault.treasury||0) > 0 ? 'var(--green)' : 'var(--muted2)') +
-      kv('Automation', (vault.automation||0) > 0 ? fmtUSD(vault.automation) + ' allocated' : 'Inactive', (vault.automation||0) > 0 ? 'var(--purple)' : 'var(--muted2)')
-    );
-  }
-
-  function renderExports() {
-    return card(
-      ch('download', 'Export Financial Statements'),
-      '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
-        '<button class="btn" onclick="UBMerchant.exportCSV()" style="font-size:8.5px;padding:5px 10px"><i class="ti ti-file-type-csv"></i>CSV</button>' +
-        '<button class="btn" onclick="UBMerchant.exportJSON()" style="font-size:8.5px;padding:5px 10px"><i class="ti ti-file-type-json"></i>JSON</button>' +
-      '</div>'
-    );
-  }
 
   /* ════════════════════════════════════════
      MAIN RENDER — three zones:
@@ -567,8 +528,6 @@
     html += renderFundAllocation();
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' + renderContacts() + renderCustomerDirectory() + '</div>';
     html += renderNetworkBreakdown();
-    html += renderBusinessHealth();
-    html += renderExports();
     return html;
   }
 

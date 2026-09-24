@@ -36,6 +36,16 @@
   function isEnabled() {
     try { return !!(typeof window !== 'undefined' && window[FLAG] === true); } catch (e) { return false; }
   }
+  /* Read conservative config set by the page before this module loads */
+  function brainCfg() {
+    try { return (typeof window !== 'undefined' && window.AUTONOMA_BRAIN_CONFIG) || {}; } catch(e) { return {}; }
+  }
+  function isAutoExecuteAllowed() {
+    var cfg = brainCfg();
+    if (cfg.requireConfirmation === true) return false;
+    if (cfg.autoExecute === false) return false;
+    return true;
+  }
   function now() {
     try { return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); } catch (e) { return Date.now(); }
   }
@@ -308,7 +318,7 @@
           operation: OP_TO_AUTH[c] || c,
           amount: Number(e.amount) || 0,
           asset: e.token || 'USDC',
-          network: e.chain || 'Arc Testnet',
+          network: e.chain || 'Arc Mainnet',
           purpose: ''
         });
         if (risk && risk.level) riskLevel = risk.level;
@@ -355,7 +365,7 @@
           return { allowed: false, riskLevel: plan.riskLevel, requiresConfirmation: false, reasons: ['No active agent authorization for "' + op + '"'], needsAuthorization: true };
         }
         if (typeof AA.validateExecution === 'function') {
-          var v = AA.validateExecution({ operation: op, amount: Number(e.amount) || 0, asset: e.token || 'USDC', network: e.chain || 'Arc Testnet', destination: e.address || '' });
+          var v = AA.validateExecution({ operation: op, amount: Number(e.amount) || 0, asset: e.token || 'USDC', network: e.chain || 'Arc Mainnet', destination: e.address || '' });
           if (v && !v.valid) {
             return { allowed: false, riskLevel: plan.riskLevel, requiresConfirmation: false, reasons: [v.reason || 'Authorization scope denied'] };
           }
@@ -369,7 +379,7 @@
     if (PE) {
       try {
         if (typeof PE.quickCheck === 'function') {
-          var pc = PE.quickCheck(op, Number(e.amount) || 0, e.token || 'USDC', e.chain || 'Arc Testnet');
+          var pc = PE.quickCheck(op, Number(e.amount) || 0, e.token || 'USDC', e.chain || 'Arc Mainnet');
           if (pc && pc.valid === false) {
             var failed = (pc.failedRules || []).map(function (r) { return r.rule + (r.reason ? ': ' + r.reason : ''); });
             return { allowed: false, riskLevel: plan.riskLevel, requiresConfirmation: false, reasons: failed.length ? failed : ['Policy check failed'] };
@@ -439,6 +449,15 @@
       return out;
     }
 
+    /* Conservative mainnet guard: block auto-execution of write intents */
+    var isWrite = !READ_INTENTS[understanding.intent];
+    if (isWrite && !isAutoExecuteAllowed()) {
+      out.ok = true;
+      out.status = 'requires_confirmation';
+      out.html = '<div style="font-size:9.5px;padding:6px 0">Intent queued — <b>requires manual approval</b> in the AI Smart Wallet Approval Center before execution.</div>';
+      return out;
+    }
+
     try {
       var html = await runtime.executeIntent(understanding.intent, understanding.params, runtime.msg || '');
       out.html = html;
@@ -498,10 +517,10 @@
     if (rec) {
       var tx = rec.transactionHash || rec.txHash || null;
       var result = rec.result || '';
-      if (result === 'success') return { status: 'confirmed', transactionHash: tx, chainId: 5042002, effects: effects(understanding) };
-      if (result === 'failed' || result === 'reverted') return { status: 'failed', transactionHash: tx, chainId: 5042002, effects: effects(understanding) };
-      if (result === 'pre_validated' || result === 'submitted') return { status: 'pending', transactionHash: tx, chainId: 5042002, effects: effects(understanding) };
-      return { status: 'pending', transactionHash: tx, chainId: 5042002, effects: effects(understanding) };
+      if (result === 'success') return { status: 'confirmed', transactionHash: tx, chainId: 5042, effects: effects(understanding) };
+      if (result === 'failed' || result === 'reverted') return { status: 'failed', transactionHash: tx, chainId: 5042, effects: effects(understanding) };
+      if (result === 'pre_validated' || result === 'submitted') return { status: 'pending', transactionHash: tx, chainId: 5042, effects: effects(understanding) };
+      return { status: 'pending', transactionHash: tx, chainId: 5042, effects: effects(understanding) };
     }
 
     // No record → the router may have only routed (not broadcast). Treat as pending.
@@ -554,23 +573,30 @@
       return execution.html;
     }
 
-    // For writes, produce an honest status message reflecting real state.
+    // For writes, produce a natural, proactive status message.
     if (understanding.isWrite) {
-      var statusText = {
-        confirmed: 'confirmed on Arc Testnet',
-        pending: 'submitted and pending confirmation',
-        failed: 'failed',
-        reverted: 'reverted on-chain',
-        unknown: 'not confirmed'
-      }[verification.status] || verification.status;
+      var op = understanding.canonical.replace(/_/g, ' ');
+      var amtStr = e.amount != null ? e.amount + ' ' + (e.token || 'USDC') : (e.token || 'USDC');
+      var toStr = e.address ? ' to <code style="font-size:9px">' + String(e.address).slice(0, 8) + '...' + String(e.address).slice(-4) + '</code>' : '';
 
-      var body = '<strong>' + (e.amount != null ? e.amount + ' ' : '') + (e.token || 'USDC') + '</strong> ' +
-        (e.address ? 'to <code>' + String(e.address).slice(0, 8) + '...</code> ' : '') +
-        '— ' + statusText + '.';
-      if (verification.transactionHash) {
-        body += '<br>Tx: <code>' + String(verification.transactionHash).slice(0, 14) + '...</code>';
+      var body;
+      if (verification.status === 'confirmed') {
+        body = 'Done. I sent <strong>' + escapeHtml(amtStr) + '</strong>' + toStr + ' on Arc Mainnet.';
+        if (verification.transactionHash) {
+          body += '<br><span style="color:var(--muted2);font-size:9px">Tx: <code>' + String(verification.transactionHash).slice(0, 16) + '...</code></span>';
+        }
+      } else if (verification.status === 'pending') {
+        body = 'Transaction submitted — waiting for confirmation on Arc Mainnet.';
+        if (verification.transactionHash) {
+          body += '<br><span style="color:var(--muted2);font-size:9px">Tx: <code>' + String(verification.transactionHash).slice(0, 16) + '...</code></span>';
+        }
+      } else if (verification.status === 'failed' || verification.status === 'reverted') {
+        body = 'I could not complete the ' + escapeHtml(op) + '.';
+        if (verification.note) body += ' Reason: ' + escapeHtml(verification.note) + '.';
+        body += ' No funds were moved.';
+      } else {
+        body = 'The ' + escapeHtml(op) + ' of <strong>' + escapeHtml(amtStr) + '</strong>' + toStr + ' has been submitted.';
       }
-      if (verification.note && verification.status === 'failed') body += '<br>' + escapeHtml(verification.note);
 
       if (render && typeof render.intro === 'function') {
         return render.intro(body);
@@ -719,7 +745,7 @@
       summary: {
         amount: (e.amount != null ? e.amount + ' ' : '') + (e.token || 'USDC'),
         recipient: e.address || '(resolved)',
-        network: e.chain || 'Arc Testnet'
+        network: e.chain || 'Arc Mainnet'
       },
       riskLevel: planObj.riskLevel,
       expiresAt: Date.now() + 5 * 60 * 1000

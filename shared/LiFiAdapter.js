@@ -28,7 +28,7 @@
 
   var API = '/api/lifi/quote';
   var STATUS_API = '/api/lifi/status';
-  var QUOTE_TTL_MS = 60000; // conservative freshness window (ms)
+  var QUOTE_TTL_MS = 30000; // 30s freshness window — reduces stale-quote execution risk
 
   function _postJson(path, body) {
     return fetch(path, {
@@ -85,8 +85,10 @@
     if (!Number.isFinite(fromChainId) || !Number.isFinite(toChainId)) {
       return { source: 'lifi', ok: false, error: 'INVALID_CHAIN_IDS' };
     }
-    var fromToken = _resolveTokenAddr(fromChainId, opts.tokenIn);
-    var toToken = _resolveTokenAddr(toChainId, opts.tokenOut);
+    // Accept explicit addresses (for chains whose full token list lives in the
+    // LI.FI cache rather than CHAIN_REGISTRY). Fall back to registry lookup.
+    var fromToken = opts.tokenInAddress || _resolveTokenAddr(fromChainId, opts.tokenIn);
+    var toToken   = opts.tokenOutAddress || _resolveTokenAddr(toChainId, opts.tokenOut);
     if (!fromToken || !toToken) {
       return { source: 'lifi', ok: false, error: 'TOKEN_NOT_REGISTERED' };
     }
